@@ -280,34 +280,46 @@ const GRADE_SCALE = [
   {min:0,max:19,grade:'F',cls:'gf',desc:'Belum Mencapai Tahap Minimum'}
 ];
 
-const STORAGE_KEY = 'pbd_marks_data';
 let currentClass = localStorage.getItem('pbd_current_class')||'1E';
 let selectedIdx = null;
-let marksData = {};
+let marksCache = {};
+let apiOnline = false;
 
-function loadData(){try{marksData=JSON.parse(localStorage.getItem(STORAGE_KEY))||{};}catch(e){marksData={};}}
-function saveData(){localStorage.setItem(STORAGE_KEY,JSON.stringify(marksData));}
-loadData();
+async function apiFetch(url, opts={}) {
+  const res = await fetch(url, { headers: {'Content-Type':'application/json'}, ...opts });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
 
-function getMarks(cls,idx){return marksData[cls]?.[idx]||{paper1:0,paper2:0};}
-function setMarks(cls,idx,paper,val){
-  if(!marksData[cls])marksData[cls]={};
-  if(!marksData[cls][idx])marksData[cls][idx]={paper1:0,paper2:0};
-  marksData[cls][idx][paper]=Math.max(0,Math.min(40,parseInt(val)||0));
-  saveData();
+async function loadMarks(cls) {
+  try {
+    const docs = await apiFetch('/api/marks?class='+encodeURIComponent(cls));
+    marksCache[cls] = docs; apiOnline = true;
+  } catch { apiOnline = false; if(!marksCache[cls]) marksCache[cls]=[]; }
+}
+
+async function saveMarks(cls, idx, paper1, paper2) {
+  try {
+    await apiFetch('/api/marks', {method:'POST', body: JSON.stringify({cls,idx,paper1,paper2})});
+    apiOnline = true;
+  } catch { apiOnline = false; }
+}
+
+function getMarks(cls, idx) {
+  return (marksCache[cls]||[]).find(m=>m.idx===idx) || {paper1:0,paper2:0};
+}
+function setMarks(cls, idx, paper, val) {
+  const v = Math.max(0, Math.min(40, parseInt(val)||0));
+  let entry = (marksCache[cls]||[]).find(m=>m.idx===idx);
+  if (!entry) { entry = {cls, idx, paper1:0, paper2:0}; if(!marksCache[cls]) marksCache[cls]=[]; marksCache[cls].push(entry); }
+  entry[paper] = v;
+  saveMarks(cls, idx, entry.paper1, entry.paper2);
 }
 
 function getPaper1(m){return m.paper1||0;}
 function getPaper2(m){return m.paper2||0;}
-function getTotalPct(m){
-  const t=getPaper1(m)+getPaper2(m);
-  return t===0?0:Math.round((t/80)*100);
-}
-function getGrade(pct){
-  for(const g of GRADE_SCALE)if(pct>=g.min&&pct<=g.max)return g;
-  return GRADE_SCALE[GRADE_SCALE.length-1];
-}
-
+function getTotalPct(m){const t=getPaper1(m)+getPaper2(m);return t===0?0:Math.round((t/80)*100);}
+function getGrade(pct){for(const g of GRADE_SCALE)if(pct>=g.min&&pct<=g.max)return g;return GRADE_SCALE[GRADE_SCALE.length-1];}
 function hasMarks(cls,idx){const m=getMarks(cls,idx);return(m.paper1||0)>0||(m.paper2||0)>0;}
 function isComplete(cls,idx){const m=getMarks(cls,idx);return(m.paper1||0)>0&&(m.paper2||0)>0;}
 
@@ -431,7 +443,19 @@ function updatePaper(paper,val){
 function renderAll(){renderClassTabs();renderProgress();renderStudentList();renderMarksPanel();}
 
 // ── Export ──
-function exportMarkdown(){
+async function exportMarkdown(){
+  try {
+    // Try server-side export first
+    const res = await fetch('/api/export');
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'PBD_Marks.md'; a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+  } catch {}
+  // Fallback: client-side export from cache
   let md='# PBD Marks\n\n';
   for(const cls of Object.keys(STUDENTS)){
     md+=`## ${cls}\n\n| No | Name | Paper 1 | Paper 2 | Total | Grade |\n|----|------|---------|---------|-------|-------|\n`;
@@ -449,12 +473,14 @@ function exportMarkdown(){
 }
 
 // ── Events ──
-document.getElementById('classTabs').addEventListener('click',e=>{
+document.getElementById('classTabs').addEventListener('click',async e=>{
   const tab=e.target.closest('.class-tab');
   if(!tab)return;
   currentClass=tab.dataset.cls;
   localStorage.setItem('pbd_current_class',currentClass);
-  selectedIdx=null;document.getElementById('searchInput').value='';renderAll();
+  selectedIdx=null;document.getElementById('searchInput').value='';
+  await loadMarks(currentClass);
+  renderAll();
 });
 document.getElementById('studentList').addEventListener('click',e=>{
   const row=e.target.closest('.student-row');
@@ -465,14 +491,21 @@ document.getElementById('studentList').addEventListener('click',e=>{
 });
 document.getElementById('searchInput').addEventListener('input',()=>renderStudentList());
 document.getElementById('btnExport').addEventListener('click',exportMarkdown);
-document.getElementById('btnClear').addEventListener('click',()=>{
-  if(confirm('Delete all marks data? This cannot be undone.')){marksData={};saveData();selectedIdx=null;document.getElementById('searchInput').value='';renderAll();}
+document.getElementById('btnClear').addEventListener('click',async ()=>{
+  if(confirm('Delete all marks data? This cannot be undone.')){
+    try { await apiFetch('/api/clear', {method:'POST'}); } catch {}
+    for(const k of Object.keys(marksCache)) marksCache[k]=[];
+    selectedIdx=null;document.getElementById('searchInput').value='';renderAll();
+  }
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&selectedIdx!==null){selectedIdx=null;renderAll();document.getElementById('searchInput').focus();}
 });
 
-renderAll();
+(async function init(){
+  await loadMarks(currentClass);
+  renderAll();
+})();
 </script>
 </body>
 </html>
