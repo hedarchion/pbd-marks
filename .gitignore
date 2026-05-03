@@ -3,3 +3,4 @@
 *.xlsx
 .env
 node_modules/
+.vercel
