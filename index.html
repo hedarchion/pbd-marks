@@ -503,6 +503,7 @@ document.addEventListener('keydown',e=>{
 });
 
 (async function init(){
+  renderAll();
   await loadMarks(currentClass);
   renderAll();
 })();

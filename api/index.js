@@ -140,7 +140,7 @@ document.getElementById('searchInput').addEventListener('input',()=>renderStuden
 document.getElementById('btnExport').addEventListener('click',exportMarkdown);
 document.getElementById('btnClear').addEventListener('click',async()=>{if(confirm('Delete all marks data?')){try{await apiFetch('/api/clear',{method:'POST'});}catch{}for(const k of Object.keys(marksCache))marksCache[k]=[];selectedIdx=null;document.getElementById('searchInput').value='';renderAll();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&selectedIdx!==null){selectedIdx=null;renderAll();document.getElementById('searchInput').focus();}});
-(function init(){loadMarks(currentClass).then(renderAll);})();
+(function init(){renderAll();loadMarks(currentClass).then(renderAll);})();
 </script>
 </body>
 </html>`;
