@@ -301,11 +301,18 @@ async function loadMarks(cls) {
   try {
     const docs = await apiFetch('/api/marks?class='+encodeURIComponent(cls));
     apiOnline = true;
-    // Merge touch flags from localStorage into API data
     const local = loadLocal();
+    // Build map from localStorage for this class (preserves most recent edits)
+    const localMap = {};
+    if (local && local[cls]) { for (const e of local[cls]) localMap[e.idx] = e; }
     marksCache[cls] = docs.map(d => {
-      const le = local&&local[cls] ? (local[cls]||[]).find(e => e.idx === d.idx) : null;
-      return { ...d, _t1: !!(le&&le._t1), _t2: !!(le&&le._t2) };
+      const le = localMap[d.idx];
+      // Prefer localStorage paper values for touched entries (API may be stale)
+      if (le && (le._t1 || le._t2)) {
+        return { ...d, paper1: le.paper1, paper2: le.paper2, _t1: !!le._t1, _t2: !!le._t2 };
+      }
+      // No localStorage for this student — derive touch state from DB values
+      return { ...d, _t1: d.paper1 > 0, _t2: d.paper2 > 0 };
     });
   } catch {
     apiOnline = false;
@@ -496,6 +503,7 @@ document.getElementById('classTabs').addEventListener('click',async e=>{
   currentClass=tab.dataset.cls;
   localStorage.setItem('pbd_current_class',currentClass);
   selectedIdx=null;document.getElementById('searchInput').value='';
+  renderAll();
   await loadMarks(currentClass);
   renderAll();
 });
