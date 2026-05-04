@@ -56,6 +56,7 @@ header{
 }
 header h1{font-size:19px;font-weight:800;letter-spacing:-.4px}
 header .sub{font-size:11px;color:var(--text2);margin-top:1px}
+#offlineBadge{color:var(--orange);font-weight:600}
 
 /* Class tabs */
 .class-tabs{
@@ -230,7 +231,7 @@ main{
 <body>
 <header>
   <h1>PBD Marks</h1>
-  <div class="sub">SMK Methodist Tanjong Malim</div>
+  <div class="sub">SMK Methodist Tanjong Malim<span id="offlineBadge" style="display:none"> &mdash; Offline</span></div>
 </header>
 <div class="class-tabs" id="classTabs"></div>
 <main>
@@ -300,7 +301,7 @@ async function apiFetch(url, opts={}) {
 async function loadMarks(cls) {
   try {
     const docs = await apiFetch('/api/marks?class='+encodeURIComponent(cls));
-    apiOnline = true;
+    apiOnline = true; updateOnlineUI();
     const local = loadLocal();
     // Build map from localStorage for this class (preserves most recent edits)
     const localMap = {};
@@ -315,7 +316,7 @@ async function loadMarks(cls) {
       return { ...d, _t1: d.paper1 > 0, _t2: d.paper2 > 0 };
     });
   } catch {
-    apiOnline = false;
+    apiOnline = false; updateOnlineUI();
     const local = loadLocal();
     marksCache[cls] = (local && local[cls]) ? local[cls] : (marksCache[cls] || []);
   }
@@ -323,8 +324,8 @@ async function loadMarks(cls) {
 
 async function saveMarks(cls, idx, paper1, paper2) {
   saveLocal();
-  try { await apiFetch('/api/marks', {method:'POST', body: JSON.stringify({cls,idx,paper1,paper2})}); apiOnline = true; }
-  catch { apiOnline = false; }
+  try { await apiFetch('/api/marks', {method:'POST', body: JSON.stringify({cls,idx,paper1,paper2})}); apiOnline = true; updateOnlineUI(); }
+  catch { apiOnline = false; updateOnlineUI(); }
 }
 
 function getMarks(cls, idx) {
@@ -357,6 +358,10 @@ function fuzzyMatch(query,target){
     else{consec=0;score-=1;}
   }
   return{match:qi===q.length,score};
+}
+
+function updateOnlineUI() {
+  document.getElementById('offlineBadge').style.display = apiOnline ? 'none' : '';
 }
 
 // ── Render ──
@@ -395,7 +400,8 @@ function renderStudentList(){
     const done=isComplete(currentClass,i),any=hasMarks(currentClass,i);
     const dotCls=done?'c':(any?'p':'n');
     let preview='';
-    if(any)preview=`<strong>${pct}%</strong> ${getGrade(pct).grade}<br><span style="font-size:10px">P1:${p1} P2:${p2}</span>`;
+    if(any){const parts=[];if(m._t1)parts.push('P1:'+p1);if(m._t2)parts.push('P2:'+p2);
+    preview=`<strong>${pct}%</strong> ${getGrade(pct).grade}<br><span style="font-size:10px">${parts.join(' ')}</span>`;}
     const sel=selectedIdx===i?' selected':'';
     return `<div class="student-row${sel}" data-idx="${i}">
       <span class="no">${i+1}</span><span class="name">${name}</span>
@@ -485,8 +491,8 @@ async function exportMarkdown(){
     md+=`## ${cls}\n\n| No | Name | Paper 1 | Paper 2 | Total | Grade |\n|----|------|---------|---------|-------|-------|\n`;
     STUDENTS[cls].forEach((name,i)=>{
       const m=getMarks(cls,i);
-      const any=(m.paper1||0)>0||(m.paper2||0)>0;
-      md+=`| ${i+1} | ${name} | ${any?getPaper1(m):''} | ${any?getPaper2(m):''} | ${any?getTotalPct(m)+'%':''} | ${any?getGrade(getTotalPct(m)).grade:''} |\n`;
+      const any=hasMarks(cls,i);
+      md+=`| ${i+1} | ${name} | ${m._t1?getPaper1(m):''} | ${m._t2?getPaper2(m):''} | ${any?getTotalPct(m)+'%':''} | ${any?getGrade(getTotalPct(m)).grade:''} |\n`;
     });
     md+='\n';
   }
@@ -497,15 +503,18 @@ async function exportMarkdown(){
 }
 
 // ── Events ──
+let classLoadSeq = 0;
 document.getElementById('classTabs').addEventListener('click',async e=>{
   const tab=e.target.closest('.class-tab');
   if(!tab)return;
-  currentClass=tab.dataset.cls;
-  localStorage.setItem('pbd_current_class',currentClass);
+  const cls = tab.dataset.cls;
+  currentClass = cls;
+  localStorage.setItem('pbd_current_class', cls);
   selectedIdx=null;document.getElementById('searchInput').value='';
   renderAll();
-  await loadMarks(currentClass);
-  renderAll();
+  const seq = ++classLoadSeq;
+  await loadMarks(cls);
+  if (seq === classLoadSeq) renderAll();
 });
 document.getElementById('studentList').addEventListener('click',e=>{
   const row=e.target.closest('.student-row');
@@ -529,6 +538,7 @@ document.addEventListener('keydown',e=>{
 });
 
 (async function init(){
+  updateOnlineUI();
   renderAll();
   await loadMarks(currentClass);
   renderAll();
